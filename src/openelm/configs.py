@@ -156,6 +156,28 @@ class P3Config(BaseConfig):
     run_name: Optional[str] = None
 
 
+defaults_imagegen = [
+    {"model": "prompt"},
+    {"qd": "mapelites"},
+    {"env": "image_evolution"},
+    "_self_",
+]
+
+
+@dataclass
+class ImageGenConfig(BaseConfig):
+    hydra: Any = field(
+        default_factory=lambda: {
+            "run": {"dir": "logs/imagegen/${hydra.job.override_dirname}"}
+        }
+    )
+    defaults: list[Any] = field(default_factory=lambda: defaults_imagegen)
+    model: Any = MISSING
+    qd: Any = MISSING
+    env: Any = MISSING
+    run_name: Optional[str] = None
+
+
 def register_configstore() -> ConfigStore:
     """Register configs with Hydra's ConfigStore."""
     cs = ConfigStore.instance()
@@ -169,6 +191,7 @@ def register_configstore() -> ConfigStore:
     cs.store(group="model", name="diff", node=DiffModelConfig)
     cs.store(name="elmconfig", node=ELMConfig)
     cs.store(name="p3config", node=P3Config)
+    cs.store(name="imagegenconfig", node=ImageGenConfig)
     return cs
 
 

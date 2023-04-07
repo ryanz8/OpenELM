@@ -192,10 +192,12 @@ class ImageGeneration(Genotype):
 
     def __str__(self) -> str:
         if self.valid:
-            return numpy_to_ascii_art(self.result_obj)
+            output_str = numpy_to_ascii_art(self.result_obj)
             # return str(self.result_obj.reshape((-1, 3)).mean(axis=0).astype(int))
         else:
-            return ""
+            output_str = ""
+
+        return self.program_str + "\nOutput:\n" + output_str
 
     def validate(self) -> bool:
         return len(self.result_obj.shape) == 3 and self.result_obj.shape[2] == 3
@@ -249,10 +251,26 @@ class ImageOptim(BaseEnvironment[ImageGeneration]):
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None
     ) -> dict[str, str]:
-        prompt_str: str = """
+        """Given a code string or a list of code strings, construct a prompt string."""
+        import_str: str = """
 import math
 import numpy as np
 """
+
+        code_prefix_str: str = """
+# Old version of draw()
+# TODO: fix bugs in the code below
+
+"""
+        if code_batch is None:
+            code_str = self.seed
+        else:
+            code_str = code_prefix_str
+            if isinstance(code_batch, list):
+                code_str += code_batch[0]
+            elif isinstance(code_batch, str):
+                code_str += code_batch
+
         instruction_str: str = """
 # Fixed version of draw()
 def draw():
@@ -264,24 +282,10 @@ def draw():
     \"\"\"
     pic = np.zeros((32, 32, 3))
 """
-        import_str: str = prompt_str
-        if code_batch is None:
-            # Initialization steps
-            prompt_str += self.seed
-        else:
-            prompt_str += """
-# Old version of draw()
-# TODO: fix bugs in the code below
 
-"""
-            # Evolution steps
-            if isinstance(code_batch, list):
-                prompt_str += code_batch[0]
-            elif isinstance(code_batch, str):
-                prompt_str += code_batch
-        import_str += instruction_str
-        prompt_str += instruction_str
-        return {"prompt": prompt_str, "template": import_str}
+        prompt_str = import_str + code_str + instruction_str
+        template_str = import_str + instruction_str
+        return {"prompt": prompt_str, "template": template_str}
 
     def generate_programs(
         self, code_batch: list[dict[str, str]]
@@ -343,8 +347,8 @@ def draw():
 
     def mutate(self, images_list: list[ImageGeneration]) -> list[ImageGeneration]:
         images = [img.program_str for img in images_list]
-        program_list = list(map(self.construct_prompt, images))
-        new_images = self.generate_programs(program_list)
+        prompt_list = list(map(self.construct_prompt, images))
+        new_images = self.generate_programs(prompt_list)
         return new_images
 
     def fitness(self, x: ImageGeneration) -> float:
@@ -432,22 +436,21 @@ class Sodarace(BaseEnvironment[Sodaracer]):
         """
         Constructs a prompt for generating Sodaracers.
 
-        Parameters:
-            code_batch (Optional[Union[list[str], str]], optional): A 
-            list of program strings or a single program string. Defaults to None.
+        The method constructs a prompt for generating Sodaracer programs
+        based on the seeds and configuration settings specified in self.seed_strs
+        and self.config.
+
+        Args:
+            code_batch (Optional[Union[list[str], str]], optional): A list of program
+            strings or a single program string. Defaults to None.
 
         Returns:
-            dict[str, str]: A dictionary containing two keys: "prompt" and 
-            "template". The "prompt" key maps to a string containing the 
+            dict[str, str]: A dictionary containing two keys: "prompt" and
+            "template". The "prompt" key maps to a string containing the
             full prompt for generating a Sodaracer program. The "template"
-            key maps to a string containing the required imports and 
+            key maps to a string containing the required imports and
             instruction for generating a Sodaracer program.
-
-        The method constructs a prompt for generating Sodaracer programs
-        based on the seeds and configuration settings specified in self.seed_strs 
-        and self.config. 
         """
-
         prompt_str: str = IMPORTS
         if "square" in self.seed_strs:
             prompt_str += SQUARE_PREREQ
@@ -509,8 +512,10 @@ class Sodarace(BaseEnvironment[Sodaracer]):
     def generate_programs(self, code_batch: list[dict[str, str]]) -> list[Sodaracer]:
         """
         Generate new programs with a mutation model and evaluate them.
+
         Args:
             code_batch (list[dict[str, str]): a list of program strings.
+
         Returns:
             list[Sodaracer]: A list of Sodaracer objects.
         """
@@ -560,19 +565,22 @@ class Sodarace(BaseEnvironment[Sodaracer]):
     def random(self) -> list[Sodaracer]:
         """
         Generates a batch of Sodaracer programs with the specified batch size.
+
         Returns a list of new Sodaracer programs.
+
         Returns:
             list[Sodaracer]: A list of random Sodaracer programs.
         """
-
         program_list = [self.construct_prompt() for _ in range(self.config.batch_size)]
         new_sodaracers = self.generate_programs(program_list)
         return new_sodaracers
 
     def mutate(self, sodaracer_list: list[Sodaracer]) -> list[Sodaracer]:
         """
-        Given a list of Sodaracer programs, constructs a prompt for each program, 
-        generate a list of new programs by mutating the prompts, and returns a 
+        Mutates a list of Sodaracer programs.
+
+        Given a list of Sodaracer programs, constructs a prompt for each program,
+        generate a list of new programs by mutating the prompts, and returns a
         list of new Sodaracer programs.
 
         Args:
@@ -581,7 +589,6 @@ class Sodarace(BaseEnvironment[Sodaracer]):
         Returns:
             list[Sodaracer]: A list of new Sodaracer programs generated by mutating the prompts.
         """
-
         sodaracers = [sr.program_str for sr in sodaracer_list]
         program_list = list(map(self.construct_prompt, sodaracers))
         new_sodaracers = self.generate_programs(program_list)
@@ -597,11 +604,10 @@ class Sodarace(BaseEnvironment[Sodaracer]):
         Returns:
             float: fitness of the Sodaracer.
 
-        The method first checks whether the Sodaracer program is valid or not using 
-        the `.evaluate()` method of the Sodaracer. If the program is invalid, 
+        The method first checks whether the Sodaracer program is valid or not using
+        the `.evaluate()` method of the Sodaracer. If the program is invalid,
         the method returns -np.inf to indicate that the program is not fit.
         """
-
         if x.valid:
             return x.evaluate(self.config.eval_ms)
         else:

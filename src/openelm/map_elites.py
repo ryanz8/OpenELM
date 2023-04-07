@@ -303,30 +303,38 @@ class MAPElitesBase:
                 if np.isclose(max_fitness, self.env.max_fitness, atol=atol):
                     break
 
-            self.fitness_history["max"].append(max_fitness)
-            self.fitness_history["min"].append(self.fitnesses.min)
-            self.fitness_history["mean"].append(self.fitnesses.mean)
+            self.fitness_history["max"].append(self.max_fitness)
+            self.fitness_history["min"].append(self.min_fitness)
+            self.fitness_history["mean"].append(self.mean_fitness)
+            print(
+                f"local max: {max_fitness} max_fitness: {self.max_fitness}, min_fitness: {self.min_fitness}, mean_fitness: {self.mean_fitness}, niches_filled: {self.niches_filled}"
+            )
 
         self.current_max_genome = max_genome
         self.visualize()
         return str(max_genome)
 
+    @property
     def niches_filled(self):
         """Get the number of niches that have been explored in the map."""
         return self.fitnesses.niches_filled
 
+    @property
     def max_fitness(self):
         """Get the maximum fitness value in the map."""
         return self.fitnesses.max_finite
 
+    @property
     def mean_fitness(self):
         """Get the mean fitness value in the map."""
         return self.fitnesses.mean
 
+    @property
     def min_fitness(self):
         """Get the minimum fitness value in the map."""
         return self.fitnesses.min_finite
 
+    @property
     def qd_score(self):
         """
         Get the quality-diversity score of the map.
@@ -349,10 +357,10 @@ class MAPElitesBase:
         if len(self.map_dims) > 1:
             ix = tuple(np.zeros(max(1, len(self.fitnesses.dims) - 2), int))
             map2d = self.fitnesses.latest[ix]
-            print(
-                "plotted genes:",
-                *[str(g) for g in self.genomes.latest[ix].flatten().tolist()],
-            )
+            # print(
+            #     "plotted genes:",
+            #     *[str(g) for g in self.genomes.latest[ix].flatten().tolist()],
+            # )
 
             plt.figure()
             plt.pcolor(map2d, cmap="inferno")
