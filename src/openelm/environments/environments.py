@@ -16,7 +16,7 @@ from openelm.configs import (
     SodaraceEnvConfig,
     StringEnvConfig,
 )
-from openelm.environments.env_utils import NULL_SEED, get_image_target
+from openelm.environments.env_utils import NULL_SEED, CLIPWrapper, get_image_target
 from openelm.environments.sodaracer import (
     CIRCLE,
     GALLOPER_PREREQ,
@@ -215,7 +215,7 @@ class ImageGeneration(Genotype):
 
     def visualize(self, ax) -> None:
         if self.valid:
-            ax.imshow(self.result_obj)
+            ax.imshow(self.result_obj.astype(np.uint8))
 
 
 class ImageOptim(BaseEnvironment[ImageGeneration]):
@@ -231,7 +231,8 @@ class ImageOptim(BaseEnvironment[ImageGeneration]):
     """
 
     # Record different definitions of behavior spaces in a dict.
-    behavior_ndims = {"3-channel": 3}
+    behavior_ndims = {"3-channel": 3, "CLIP": 3}
+    behavior_bounds = {"3-channel": [0, 255], "CLIP": [0, 255]}
 
     def __init__(
         self,
@@ -240,13 +241,20 @@ class ImageOptim(BaseEnvironment[ImageGeneration]):
     ):
         self.config: ImageEnvConfig = config
         self.batch_size = self.config.batch_size
-        self.target_img: np.ndarray = get_image_target(self.config.target)
         self.seed: str = NULL_SEED
         self.mutation_model: MutationModel = mutation_model
 
         self.behavior_mode: str = self.config.behavior_mode
         self.genotype_ndim: int = self.behavior_ndims[self.behavior_mode]
-        self.genotype_space = np.repeat([[0, 255]], self.genotype_ndim, axis=0).T
+        self.genotype_space = np.repeat(
+            [self.behavior_bounds[self.behavior_mode]], self.genotype_ndim, axis=0
+        ).T
+
+        if self.behavior_mode == "3-channel":
+            self.target_img: np.ndarray = get_image_target(self.config.target)
+        elif self.behavior_mode == "CLIP":
+            self.behavior_model = CLIPWrapper()
+            self.target_prompt: str = self.config.target
 
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None
@@ -255,6 +263,27 @@ class ImageOptim(BaseEnvironment[ImageGeneration]):
         import_str: str = """
 import math
 import numpy as np
+"""
+        example_str: str = """
+def draw_circle():
+    \"\"\"
+    Draws a yellow circle with radius 10 in the middle of a 32 by 32 black image.
+
+    Returns:
+        np.ndarray: the image
+    \"\"\"
+    pic = np.zeros((32, 32, 3))
+
+    # Circle in middle of image
+    for x in range(0, 32):
+        for y in range(0, 32):
+            distance = math.sqrt(math.pow(x - 16, 2) + math.pow(y - 16, 2))
+            if distance > 10:
+                continue
+
+            pic[x][y] = [255, 255, 0]
+    return pic
+
 """
 
         code_prefix_str: str = """
@@ -275,7 +304,7 @@ import numpy as np
 # Fixed version of draw()
 def draw():
     \"\"\"
-    Draws a yellow circle with radius 10 in the middle of a 32 by 32 black image.
+    Draws a yellow smiley face with radius 10 in the middle of a 32 by 32 black image.
 
     Returns:
         np.ndarray: the image
@@ -283,8 +312,8 @@ def draw():
     pic = np.zeros((32, 32, 3))
 """
 
-        prompt_str = import_str + code_str + instruction_str
-        template_str = import_str + instruction_str
+        prompt_str = import_str + example_str + code_str + instruction_str
+        template_str = import_str + example_str + instruction_str
         return {"prompt": prompt_str, "template": template_str}
 
     def generate_programs(
@@ -338,6 +367,7 @@ def draw():
                 except Exception as e:
                     if self.config.debug:
                         print(type(e), e)
+            print(f"{len(result_list)}/{len(results)} successful")
             return [ImageGeneration(**p) for p in result_list]
 
     def random(self) -> list[ImageGeneration]:
@@ -352,9 +382,24 @@ def draw():
         return new_images
 
     def fitness(self, x: ImageGeneration) -> float:
-        if not x.valid or x.result_obj.shape != self.target_img.shape:
-            return -np.inf
-        return -np.abs(x.result_obj - self.target_img).sum()
+        if self.behavior_mode == "3-channel":
+            if not x.valid or x.result_obj.shape != self.target_img.shape:
+                return -np.inf
+            return -np.abs(x.result_obj - self.target_img).sum()
+        elif self.behavior_mode == "CLIP":
+            if not x.valid or x.result_obj.ndim != 3:
+                return -np.inf
+            # small hack to make the numbers nicer; in the future we should take a custom atol in MAPElites.search
+            return (
+                -100.0
+                / self.behavior_model(image=x.result_obj, prompts=[self.target_prompt])[
+                    0
+                ]
+            )
+        else:
+            raise Exception(
+                f"Unknown behavior mode {self.behavior_mode} in fitness evaluation"
+            )
 
 
 class Sodaracer(Genotype):

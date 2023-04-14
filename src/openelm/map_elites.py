@@ -272,6 +272,7 @@ class MAPElitesBase:
             # into the behavior space one-by-one.
             # TODO: account for the case where multiple new individuals are
             # placed in the same niche, for saving histories.
+            generation_fitnesses = []
             for individual in new_individuals:
                 fitness = self.env.fitness(individual)
                 if np.isinf(fitness):
@@ -289,6 +290,8 @@ class MAPElitesBase:
                     self.history[map_ix].append(individual)
                 self.nonzero[map_ix] = True
 
+                generation_fitnesses.append(fitness)
+
                 # If new fitness greater than old fitness in niche, replace.
                 if fitness > self.fitnesses[map_ix]:
                     self.fitnesses[map_ix] = fitness
@@ -303,6 +306,9 @@ class MAPElitesBase:
                 if np.isclose(max_fitness, self.env.max_fitness, atol=atol):
                     break
 
+            print(
+                f"generation max: {max(generation_fitnesses)} min:{min(generation_fitnesses)} len: {len(generation_fitnesses)}"
+            )
             self.fitness_history["max"].append(self.max_fitness)
             self.fitness_history["min"].append(self.min_fitness)
             self.fitness_history["mean"].append(self.mean_fitness)
