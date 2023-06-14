@@ -120,8 +120,8 @@ class P3EnvConfig(EnvConfig):
 @dataclass
 class PromptEnvConfig(EnvConfig):
     env_name: str = "prompt_evolution"
-    task_name: str = "antonym"  # toy or antonym
-    evals_per_prompt: int = 1  # TODO
+    task_name: str = "cot"  # toy or antonym or cot
+    evals_per_prompt: int = 10
 
 
 defaults_elm = [
