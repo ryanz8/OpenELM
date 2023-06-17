@@ -140,3 +140,4 @@ outputs
 # generated dot files and tree graphs
 .gv
 .png
+*.png

@@ -1,5 +1,7 @@
 import json
+from abc import ABC
 from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 
@@ -67,7 +69,36 @@ A:"""
 
 
 @dataclass
-class APEPromptTask:
+class PromptTask(ABC):
+    base_template: str
+    input_variables: List[str]
+    generation_instruction: str
+    mutation_instructions: List[str]
+    few_shot_template: str
+
+    def get_random_data(self, n_examples):
+        assert n_examples <= len(
+            self.input_list
+        ), "n_examples is larger than available data size"
+        indices = np.random.choice(len(self.input_list), size=n_examples, replace=False)
+        return [self.input_list[idx] for idx in indices], [
+            self.output_list[idx] for idx in indices
+        ]
+
+    def create_few_shot_examples(self, n_examples):
+        few_shot_examples = ""
+        sampled_inputs, sampled_outputs = self.get_random_data(n_examples)
+
+        for input_str, output_str in zip(sampled_inputs, sampled_outputs):
+            few_shot_examples += self.few_shot_template.format(
+                input_str=input_str, output_str=output_str
+            )
+
+        return few_shot_examples
+
+
+@dataclass
+class QAPromptTask(PromptTask):
     base_template = """Instruction: {instruction_str}
 Input: {input_str}
 Output: {output_str}"""
@@ -98,31 +129,12 @@ Old instruction: {instruction_str}
 New instruction: """,
     ]
 
-    evaluation_instruction = """Instruction: {instruction_str}
-Input: {input_str}
-Output: {output_str}"""
+    #     evaluation_instruction = """Instruction: {instruction_str}
+    # Input: {input_str}
+    # Output: {output_str}"""
 
-    def get_random_data(self, n_examples):
-        assert n_examples <= len(
-            self.input_list
-        ), "n_examples is larger than available data size"
-        indices = np.random.choice(len(self.input_list), size=n_examples, replace=False)
-        return [self.input_list[idx] for idx in indices], [
-            self.output_list[idx] for idx in indices
-        ]
+    few_shot_template = "Input: {input_str}\nOutput: {output_str}\n\n"
 
-    def create_few_shot_examples(self, n_examples):
-        few_shot_examples = ""
-        sampled_inputs, sampled_outputs = self.get_random_data(n_examples)
-
-        for input_str, output_str in zip(sampled_inputs, sampled_outputs):
-            few_shot_examples += f"Input: {input_str}\nOutput: {output_str}\n\n"
-
-        return few_shot_examples
-
-
-@dataclass
-class QAPromptTask(APEPromptTask):
     def load_data(self, data_path):
         # Load the data
         with open(SRC_PATH / data_path) as f:
@@ -153,7 +165,39 @@ class AntonymPromptTask(QAPromptTask):
 
 
 @dataclass
-class COTPromptTask(APEPromptTask):
+class COTPromptTask(PromptTask):
+    base_template = """Instruction: Answer the following question.
+Q: {input_str}
+A: Let's {instruction_str} {output_str}"""
+
+    input_variables = [
+        "instruction_str",
+        "input_str",
+        "output_str",
+    ]
+
+    generation_instruction = """Here are some math problems I did with my student.\n{few_shot_examples}\nWe encountered a hard one. They asked me how to start and I said, \"Let's"""
+
+    mutation_instructions = [
+        """Generate a new instruction based on the old instruction that keeps the semantic meaning.
+
+Old instruction: {instruction_str}
+
+New instruction: """,
+        """Rewrite this instruction to be more polite.
+
+Old instruction: {instruction_str}
+
+New instruction: """,
+        """Rewrite this instruction to be more forceful.
+
+Old instruction: {instruction_str}
+
+New instruction: """,
+    ]
+
+    few_shot_template = "Q: {input_str}\nA: {output_str}\n\n"
+
     def __init__(self):
         self.input_list = []
         self.output_list = []
