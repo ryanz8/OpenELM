@@ -279,8 +279,12 @@ class MAPElitesBase:
             # compute top indices
             if hasattr(self.fitnesses, "top"):
                 top_array = np.array(self.fitnesses.top)
-                for cell_idx in np.ndindex(self.fitnesses.array.shape[1:]): # all indices of cells in map
-                    nonzero = np.nonzero(self.fitnesses.array[(slice(None),) + cell_idx] != -np.inf) # check full history depth at cell
+                for cell_idx in np.ndindex(
+                    self.fitnesses.array.shape[1:]
+                ):  # all indices of cells in map
+                    nonzero = np.nonzero(
+                        self.fitnesses.array[(slice(None),) + cell_idx] != -np.inf
+                    )  # check full history depth at cell
                     if len(nonzero[0]) > 0:
                         top_array[cell_idx] = nonzero[0][-1]
                 # correct stats
@@ -309,6 +313,40 @@ class MAPElitesBase:
         ix = self.rng.choice(np.flatnonzero(self.nonzero.array))
         return np.unravel_index(ix, self.nonzero.dims)
 
+    def insert_individual(self, individual: Genotype, fitness: float) -> bool:
+        """
+        Insert an individual into the map.
+
+        Args:
+            individual (Genotype): The individual to insert.
+            fitness (float): The fitness of the individual.
+
+        Returns:
+            True if the individual was inserted, False if it was not.
+        """
+        if np.isinf(fitness):
+            return False
+        map_ix = self.to_mapindex(individual.to_phenotype())
+        # if the return is None, the individual is invalid and is thrown
+        # into the recycle bin.
+        if map_ix is None:
+            self.recycled[self.recycled_count % len(self.recycled)] = individual
+            self.recycled_count += 1
+            return False
+
+        if self.save_history:
+            # TODO: thresholding
+            self.history[map_ix].append(individual)
+        self.nonzero[map_ix] = True
+
+        # If new fitness greater than old fitness in niche, replace.
+        if fitness > self.fitnesses[map_ix]:
+            self.fitnesses[map_ix] = fitness
+            self.genomes[map_ix] = individual
+            return True
+
+        return False
+
     def search(self, init_steps: int, total_steps: int, atol: float = 0.0) -> str:
         """
         Run the MAP-Elites search algorithm.
@@ -332,13 +370,26 @@ class MAPElitesBase:
         if self.niches_filled() == 0:
             max_fitness = -np.inf
             max_genome = None
-        else: # take max fitness in case of filled loaded snapshot
+        else:  # take max fitness in case of filled loaded snapshot
             max_fitness = self.max_fitness()
             max_index = np.where(self.fitnesses.latest == max_fitness)
             max_genome = self.genomes[max_index]
         if self.save_history:
             self.history = defaultdict(list)
 
+        # seed the map with predefined individuals if provided
+        new_individuals: list[Genotype] = self.env.initial_individuals()
+        for individual in new_individuals:
+            fitness = self.env.fitness(individual)
+            inserted = self.insert_individual(individual, fitness)
+            # If new fitness is the highest so far, update the tracker.
+            if inserted and fitness > max_fitness:
+                max_fitness = fitness
+                max_genome = individual
+
+                tbar.set_description(f"{max_fitness=:.4f}")
+
+        self.mutation_successes = defaultdict(lambda: [0, 0])  # successes, attempts
         for n_steps in tbar:
             if n_steps < init_steps or self.genomes.empty:
                 # Initialise by generating initsteps random solutions.
@@ -360,27 +411,17 @@ class MAPElitesBase:
             # placed in the same niche, for saving histories.
             for individual in new_individuals:
                 fitness = self.env.fitness(individual)
-                if np.isinf(fitness):
-                    continue
-                map_ix = self.to_mapindex(individual.to_phenotype())
-                # if the return is None, the individual is invalid and is thrown
-                # into the recycle bin.
-                if map_ix is None:
-                    self.recycled[self.recycled_count % len(self.recycled)] = individual
-                    self.recycled_count += 1
-                    continue
+                self.mutation_successes[individual.mutation_type][
+                    1
+                ] += 1  # increment attempts
+                inserted = self.insert_individual(individual, fitness)
+                if inserted:
+                    self.mutation_successes[individual.mutation_type][
+                        0
+                    ] += 1  # increment successes
 
-                if self.save_history:
-                    # TODO: thresholding
-                    self.history[map_ix].append(individual)
-                self.nonzero[map_ix] = True
-
-                # If new fitness greater than old fitness in niche, replace.
-                if fitness > self.fitnesses[map_ix]:
-                    self.fitnesses[map_ix] = fitness
-                    self.genomes[map_ix] = individual
                 # If new fitness is the highest so far, update the tracker.
-                if fitness > max_fitness:
+                if inserted and fitness > max_fitness:
                     max_fitness = fitness
                     max_genome = individual
 
@@ -395,8 +436,18 @@ class MAPElitesBase:
             self.fitness_history["qd_score"].append(self.qd_score())
             self.fitness_history["niches_filled"].append(self.niches_filled())
 
-            if self.save_snapshot_interval is not None and n_steps != 0 and n_steps % self.save_snapshot_interval == 0:
+            if (
+                self.save_snapshot_interval is not None
+                and n_steps != 0
+                and n_steps % self.save_snapshot_interval == 0
+            ):
                 self.save_results(step=n_steps)
+
+        self.mutation_success_rates = {
+            op: successes / attempts
+            for op, (successes, attempts) in self.mutation_successes.items()
+        }
+        print(self.mutation_success_rates)
 
         self.current_max_genome = max_genome
         self.save_results(step=n_steps)
@@ -438,6 +489,7 @@ class MAPElitesBase:
             fitnesses=self.fitnesses.array,
             genomes=self.genomes.array,
             nonzero=self.nonzero.array,
+            mutation_successes=dict(self.mutation_successes),
         )
         if self.save_history:
             with open((output_folder / "history.pkl"), "wb") as f:

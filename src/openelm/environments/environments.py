@@ -94,8 +94,11 @@ def get_positive_score(sentiment, mode="distilbert"):
         )
     elif mode == "roberta":
         return next(
-            result["score"] for result in sentiment if result["label"] == "LABEL_2"
+            result["score"] for result in sentiment if result["label"] == "positive"
         )
+        # return next(
+        #     result["score"] for result in sentiment if result["label"] == "LABEL_2"
+        # )
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
@@ -108,14 +111,28 @@ def get_negative_score(sentiment, mode="distilbert"):
         )
     elif mode == "roberta":
         return next(
-            result["score"] for result in sentiment if result["label"] == "LABEL_0"
+            result["score"] for result in sentiment if result["label"] == "negative"
         )
+        # return next(
+        #     result["score"] for result in sentiment if result["label"] == "LABEL_0"
+        # )
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
 
 def get_sentiment_score(sentiment, mode="distilbert"):
     return get_positive_score(sentiment, mode) - get_negative_score(sentiment, mode)
+
+
+def get_first_sentence(text):
+    text = text.replace('"', "").lstrip(".?! \n")
+    delimiters = [".", "!", "?"]
+    positions = [text.find(delim) for delim in delimiters if text.find(delim) >= 0]
+    first_delim_pos = min(positions) if positions else -1
+    if first_delim_pos != -1:
+        return text[: first_delim_pos + 1].strip()
+    else:
+        return text
 
 
 class Genotype(ABC):
@@ -142,6 +159,10 @@ class BaseEnvironment(ABC, Generic[GenoType]):
 
     @abstractmethod
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
+        raise NotImplementedError
+
+    @abstractmethod
+    def initial_individuals(self) -> list[GenoType]:
         raise NotImplementedError
 
     @abstractmethod
@@ -196,6 +217,9 @@ class FunctionOptim(BaseEnvironment[ArrayGenotype]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         self.rng = rng_state
 
+    def initial_individuals(self) -> list[ArrayGenotype]:
+        return []
+
     def random(self) -> list[ArrayGenotype]:
         return [
             ArrayGenotype(self.rng.uniform(*self.genotype_space))
@@ -245,6 +269,9 @@ class MatchString(BaseEnvironment[StringArrayGenotype]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         self.rng = rng_state
 
+    def initial_individuals(self) -> list[StringArrayGenotype]:
+        return []
+
     def random(self) -> list[StringArrayGenotype]:
         return [
             StringArrayGenotype(self.rng.uniform(*self.genotype_space))
@@ -279,6 +306,7 @@ class PromptGenotype(Genotype):
         prompt: PromptTemplate,
         fixed_inputs: Optional[dict[str, str]] = None,
         behavior_model=None,
+        mutation_type=None,
     ):
         self.fixed_inputs = fixed_inputs
         if fixed_inputs:
@@ -288,7 +316,8 @@ class PromptGenotype(Genotype):
         self.result_obj = None
         if behavior_model:
             # assume sentiment analysis; can expand this later
-            sentiment = behavior_model(self.__str__())
+            # roberta has a token limit, so trim to 700 characters
+            sentiment = behavior_model(self.__str__()[:700])
             self.behavior = (
                 len(self.fixed_inputs["instruction_str"]),
                 get_sentiment_score(
@@ -297,6 +326,7 @@ class PromptGenotype(Genotype):
             )
         else:
             self.behavior = (len(self.fixed_inputs["instruction_str"]),)
+        self.mutation_type = mutation_type
 
     def __str__(self) -> str:
         return self.fixed_inputs["instruction_str"]
@@ -333,7 +363,7 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             self.fitness_model = mutation_model
         self.behavior_model = pipeline(
             "sentiment-analysis",
-            model="cardiffnlp/twitter-roberta-base-sentiment",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest",
             # model="distilbert-base-uncased-finetuned-sst-2-english",
             top_k=None,
             # return_all_scores=True,
@@ -370,6 +400,34 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         self.rng = rng_state
 
+    def initial_individuals(
+        self, prompts: Optional[list[str]] = None
+    ) -> list[PromptGenotype]:
+        if prompts is not None:
+            return [
+                PromptGenotype(
+                    prompt=self.base_prompt,
+                    fixed_inputs={
+                        "instruction_str": instruction_str,
+                    },
+                    behavior_model=self.behavior_model,
+                )
+                for instruction_str in prompts
+            ]
+        elif self.task.initial_prompts:
+            return [
+                PromptGenotype(
+                    prompt=self.base_prompt,
+                    fixed_inputs={
+                        "instruction_str": instruction_str,
+                    },
+                    behavior_model=self.behavior_model,
+                )
+                for instruction_str in self.task.initial_prompts
+            ]
+        else:
+            return []
+
     def random(self) -> list[PromptGenotype]:
         return [self.random_prompt() for _ in range(self.batch_size)]
 
@@ -388,7 +446,7 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             or self.task_name == "cot"
         ):
             few_shot_examples = self.task.create_few_shot_examples(
-                n_examples=10,
+                n_examples=self.config.induction_examples,
             )
             generation_prompt = PromptTemplate(
                 input_variables=["few_shot_examples"],
@@ -398,15 +456,9 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
                 llm=self.fitness_model.model, prompt=generation_prompt
             )
             result = generation_chain({"few_shot_examples": few_shot_examples})
-            new_instruction_str = result["text"]
 
             # take only the first sentence
-            new_instruction_str = (
-                new_instruction_str.replace('"', "")
-                .lstrip("0123456789. \n")
-                .split(".")[0]
-                + "."
-            )
+            new_instruction_str = get_first_sentence(result["text"])
 
             inputs = {
                 "instruction_str": new_instruction_str,
@@ -416,6 +468,7 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             prompt=self.base_prompt,
             fixed_inputs=inputs,
             behavior_model=self.behavior_model,
+            mutation_type="generated",
         )
 
     def mutate(self, genomes: list[PromptGenotype]) -> list[PromptGenotype]:
@@ -423,12 +476,15 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
         return prompts
 
     def mutate_prompt(self, prompt):
+        # pick a mutation method
+        rewrite_instruction = np.random.choice(self.task.mutation_instructions)
+
         if self.task_name == "toy":
             # mutate the instruction string; note that we also need to change the few shot examples to match
             old_instruction_str = prompt.fixed_inputs["instruction_str"]
             result = self.rewrite_string(
                 input_str=old_instruction_str,
-                rewrite_instruction=np.random.choice(self.task.mutation_instructions),
+                rewrite_instruction=rewrite_instruction,
                 variable_name="instruction_str",
             )
             new_instruction_str = (
@@ -447,23 +503,17 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             or self.task_name == "animal"
             or self.task_name == "cot"
         ):
-            if np.random.random() > 0.3:
+            if np.random.random() > 0.20:
                 # rewrite the instruction string
                 old_instruction_str = prompt.fixed_inputs["instruction_str"]
                 result = self.rewrite_string(
                     input_str=old_instruction_str,
-                    rewrite_instruction=np.random.choice(
-                        self.task.mutation_instructions
-                    ),
+                    rewrite_instruction=rewrite_instruction,
                     variable_name="instruction_str",
                 )
-                new_instruction_str = (
-                    result["text"]
-                    .replace('"', "")
-                    .lstrip("0123456789. \n")
-                    .split(".")[0]
-                    + "."
-                )  # take the first sentence
+                # take only the first sentence
+                new_instruction_str = get_first_sentence(result["text"])
+
                 inputs = {
                     "instruction_str": new_instruction_str,
                 }
@@ -475,6 +525,7 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             prompt=self.base_prompt,
             fixed_inputs=inputs,
             behavior_model=self.behavior_model,
+            mutation_type=rewrite_instruction,
         )
 
     def rewrite_string(self, input_str, rewrite_instruction, variable_name):
@@ -524,10 +575,6 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
             or self.task_name == "cot"
         ):
             fitnesses = []
-            # eval_template = PromptTemplate(
-            #     input_variables=["instruction_str", "input_str", "output_str"],
-            #     template=self.task.evaluation_instruction,
-            # )
             inputs, outputs = self.task.get_random_data(
                 n_examples=self.config.evals_per_prompt
             )
@@ -704,6 +751,9 @@ class ImageOptim(BaseEnvironment[ImageGeneration]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         warnings.warn("WARNING: rng state not used in this environment")
         pass
+
+    def initial_individuals(self) -> list[ImageGeneration]:
+        return []
 
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None
@@ -892,6 +942,9 @@ class Sodarace(BaseEnvironment[Sodaracer]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         warnings.warn("WARNING: rng state not used in this environment")
         pass
+
+    def initial_individuals(self) -> list[Sodaracer]:
+        return []
 
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None
@@ -1229,6 +1282,9 @@ class P3Problem(BaseEnvironment[P3Solution]):
         warnings.warn("WARNING: rng state not used in this environment")
         pass
 
+    def initial_individuals(self) -> list[P3Solution]:
+        return []
+
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None
     ) -> dict[str, str]:
@@ -1497,6 +1553,9 @@ class P3ProbSol(BaseEnvironment[P3ProbSolResult]):
     def set_rng_state(self, rng_state: Optional[np.random._generator.Generator]):
         warnings.warn("WARNING: rng state not used in this environment")
         pass
+
+    def initial_individuals(self) -> list[P3ProbSolResult]:
+        return []
 
     def construct_prompt(
         self, code_batch: Optional[Union[list[str], str]] = None

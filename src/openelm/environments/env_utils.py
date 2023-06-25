@@ -32,6 +32,14 @@ def draw():
 NULL_SEED: str = ""
 
 
+def color_circle(x, y, x0, y0, radius):
+    """Colors the pixel at (x, y) yellow if it is within a circle of radius `radius` centered at (x0, y0)."""
+    if (y - y0) ** 2 + (x - x0) ** 2 <= radius**2:
+        return np.array([255, 255, 0])
+    else:
+        return np.array([0, 0, 0])
+
+
 @dataclass
 class ToyPromptTask:
     base_template = "{few_shot_examples}\n{instruction_str} the word {target} {n_repetitions} times:"
@@ -61,6 +69,7 @@ A: End
 Q: What is a synonym for {instruction_str}?
 A:"""
     ]
+    initial_prompts = []
 
     def create_few_shot_examples(self, instruction_str):
         return f"""{instruction_str} the word {self.target} 2 times: {self.target} {self.target}
@@ -75,6 +84,7 @@ class PromptTask(ABC):
     generation_instruction: str
     mutation_instructions: List[str]
     few_shot_template: str
+    initial_prompts: List[str]
 
     def get_random_data(self, n_examples):
         assert n_examples <= len(
@@ -114,18 +124,105 @@ Output: {output_str}"""
     mutation_instructions = [
         """Generate a new instruction based on the old instruction that keeps the semantic meaning.
 
-Old instruction: {instruction_str}
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Create a five-item list of synonyms for the word given.
 
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Rephrase the provided sentence so it concludes with a rhyming pair of words.
+
+Old instruction: Confirm the truthfulness of the input historical event statement.
+New instruction: Validate the accuracy of the statement about the given historical event.
+
+Old instruction: Rewrite the input sentence using advanced vocabulary.
+New instruction: Reframe the given sentence by incorporating sophisticated language.
+
+Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
+New instruction: Change the point of view of the given paragraph from first-person to third-person, or the reverse.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Examine the given text and identify the main emotional tone it expresses.
+
+Old instruction: Provide a five-sentence summary of the input text or article.
+New instruction: Deliver a concise summary, in five sentences, of the text or article given.
+
+Old instruction: Translate the input sentence with slang into standard, formal English.
+New instruction: Convert the provided sentence, filled with slang, into regular, formal English.
+
+Old instruction: Turn the input statement into a corresponding question.
+New instruction: Transform the given statement into a related question.
+
+Old instruction: Generate a plausible prediction about future events based on the input description of current events.
+New instruction: Formulate a believable forecast about future happenings, given the description of current events.
+
+Old instruction: {instruction_str}
 New instruction: """,
         """Rewrite this instruction to be more polite.
 
-Old instruction: {instruction_str}
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Would you kindly generate a list of five synonyms for the word provided?
 
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Could you please transform the given sentence so that it ends in a rhyming couplet?
+
+Old instruction: Confirm the truthfulness of the input historical event statement.
+New instruction: If you wouldn't mind, could you verify whether the provided historical event statement is true?
+
+Old instruction: Rewrite the input sentence using advanced vocabulary.
+New instruction: If it's not too much trouble, could you rewrite the sentence using a more sophisticated vocabulary?
+
+Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
+New instruction: Would it be possible to adjust the narrative perspective of the paragraph from first-person to third-person, or the other way around?
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Could you kindly analyze the text and determine the main emotion it communicates?
+
+Old instruction: Provide a five-sentence summary of the input text or article.
+New instruction: When you have a moment, could you condense the provided text into a five-sentence summary?
+
+Old instruction: Translate the input sentence with slang into standard, formal English.
+New instruction: If it isn't too much trouble, could you translate the sentence, which includes slang, into standard English?
+
+Old instruction: Turn the input statement into a corresponding question.
+New instruction: Could you please convert the provided statement into a matching question?
+
+Old instruction: Generate a plausible prediction about future events based on the input description of current events.
+New instruction: Would you be so kind as to make a plausible prediction about future occurrences based on the current events described?
+
+Old instruction: {instruction_str}
 New instruction: """,
         """Rewrite this instruction to be more forceful.
 
-Old instruction: {instruction_str}
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: You must produce a list of five synonyms for the provided word, no exceptions.
 
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Transform the given sentence into a rhyming couplet immediately.
+
+Old instruction: Confirm the truthfulness of the input historical event statement.
+New instruction: Verify the accuracy of the historical event statement without delay.
+
+Old instruction: Rewrite the input sentence using advanced vocabulary.
+New instruction: Immediately upgrade the provided sentence with more sophisticated vocabulary.
+
+Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
+New instruction: Promptly shift the narrative perspective of the given paragraph from first-person to third-person, or vice versa.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Conduct a swift analysis of the text and determine the dominant emotion it communicates.
+
+Old instruction: Provide a five-sentence summary of the input text or article.
+New instruction: You are required to condense the input text into a comprehensive five-sentence summary at once.
+
+Old instruction: Translate the input sentence with slang into standard, formal English.
+New instruction: Immediately convert the given slang-filled sentence into formal, standard English.
+
+Old instruction: Turn the input statement into a corresponding question.
+New instruction: Without delay, restructure the given statement into an appropriate question.
+
+Old instruction: Generate a plausible prediction about future events based on the input description of current events.
+New instruction: Immediately formulate a credible prediction about future outcomes based on the current events provided.
+
+Old instruction: {instruction_str}
 New instruction: """,
     ]
 
@@ -134,6 +231,8 @@ New instruction: """,
     # Output: {output_str}"""
 
     few_shot_template = "Input: {input_str}\nOutput: {output_str}\n\n"
+
+    initial_prompts = []
 
     def load_data(self, data_path):
         # Load the data
@@ -176,41 +275,56 @@ A: Let's {instruction_str} {output_str}"""
         "output_str",
     ]
 
-    generation_instruction = """Here are some math problems I did with my student.\n{few_shot_examples}\nWe encountered a hard one. They asked me how to start and I said, \"Let's"""
+    generation_instruction = """Here are some problems I did with my student.\n{few_shot_examples}\nWe encountered a hard one. They asked me how to start and I said, \"Let's"""
 
     mutation_instructions = [
         """Generate a new instruction based on the old instruction that keeps the semantic meaning.
 
-Old instruction: {instruction_str}
+Old instruction: Let's {instruction_str}
 
-New instruction: """,
+New instruction: Let's """,
         """Rewrite this instruction to be more polite.
 
-Old instruction: {instruction_str}
+Old instruction: Let's {instruction_str}
 
 New instruction: """,
         """Rewrite this instruction to be more forceful.
 
-Old instruction: {instruction_str}
+Old instruction: Let's {instruction_str}
 
-New instruction: """,
+New instruction: Let's """,
+        """Rewrite this instruction to be more clear and concise.
+
+Old instruction: Let's {instruction_str}
+
+New instruction: Let's """,
+        """Rewrite this instruction to add additional instructions.
+
+Old instruction: Let's {instruction_str}
+
+New instruction: Let's """,
     ]
 
     few_shot_template = "Q: {input_str}\nA: {output_str}\n\n"
+
+    initial_prompts = [
+        "think step by step.",
+        "work this out in a step by step way to be sure we have the right answer.",
+    ]
 
     def __init__(self):
         self.input_list = []
         self.output_list = []
 
-        # load CoT dataset
-        with open(
-            SRC_PATH / "environments/prompt/datasets/cot_dataset/addsub.csv", "r"
-        ) as file:
-            for line in file:
-                row = line.strip().split(",")
-                self.input_list.append(row[0])
-                self.output_list.append(row[1])
+        dir_path = SRC_PATH / "environments/prompt/datasets/cot_dataset"
 
+        # concatenate all the files in the CoT dataset
+        for csv_file in dir_path.glob("*.csv"):
+            with open(csv_file, "r") as file:
+                for line in file:
+                    row = line.strip().split(",")
+                    self.input_list.append(row[0])
+                    self.output_list.append(row[1])
         assert len(self.input_list) == len(self.output_list)
 
 
