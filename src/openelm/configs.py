@@ -139,7 +139,7 @@ class PromptEnvConfig(EnvConfig):
     env_name: str = "prompt_evolution"
     task_name: str = "antonym"  # toy or antonym or animal or cot
     induction_examples: int = 10  # number of examples to use for instruction induction
-    evals_per_prompt: int = 25
+    evals_per_prompt: int = 100  # 100
 
 
 defaults_elm = [

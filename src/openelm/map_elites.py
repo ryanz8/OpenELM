@@ -556,6 +556,7 @@ class MAPElitesBase:
 
             plt.figure()
             plt.pcolor(map2d, cmap="inferno")
+            plt.colorbar(label="Fitness")
             plt.savefig(f"{save_path}/MAPElites_vis.png")
 
     def visualize_individuals(self):

@@ -135,6 +135,13 @@ def get_first_sentence(text):
         return text
 
 
+def sigmoid(x):
+    if x >= 0:
+        return 1.0 / (1.0 + np.exp(-x))
+    else:
+        return np.exp(x) / (1.0 + np.exp(x))
+
+
 class Genotype(ABC):
     def __str__(self) -> str:
         raise NotImplementedError
@@ -447,6 +454,7 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
         ):
             few_shot_examples = self.task.create_few_shot_examples(
                 n_examples=self.config.induction_examples,
+                dataset="generation",
             )
             generation_prompt = PromptTemplate(
                 input_variables=["few_shot_examples"],
@@ -576,7 +584,8 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
         ):
             fitnesses = []
             inputs, outputs = self.task.get_random_data(
-                n_examples=self.config.evals_per_prompt
+                n_examples=self.config.evals_per_prompt,
+                dataset="eval",
             )
             for input_str, output_str in zip(inputs, outputs):
                 fitnesses.append(
@@ -587,7 +596,9 @@ class PromptEvolution(BaseEnvironment[PromptGenotype]):
                         output_str,
                     )
                 )
-            fitness = np.mean(fitnesses)
+
+            # use sigmoid to ensure positive fitness so we have meaningful QD score
+            fitness = sigmoid(np.mean(fitnesses))
             if self.config.debug:
                 print(
                     f"-- instruction_str --\n{x.fixed_inputs['instruction_str']}\n-- Fitness: {fitness} --\n-- Behavior: {x.to_phenotype()} --\n"

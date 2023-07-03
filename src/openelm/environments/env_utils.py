@@ -1,7 +1,7 @@
 import json
 from abc import ABC
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 import numpy as np
 
@@ -79,25 +79,36 @@ A:"""
 
 @dataclass
 class PromptTask(ABC):
-    base_template: str
-    input_variables: List[str]
-    generation_instruction: str
-    mutation_instructions: List[str]
-    few_shot_template: str
-    initial_prompts: List[str]
+    data: Dict[str, Dict[str, list]] = field(default_factory=dict)
 
-    def get_random_data(self, n_examples):
+    def get_random_data(self, n_examples, dataset="generation"):
+        """
+        Returns n_examples random examples from the dataset.
+
+        Args:
+            n_examples: number of examples to return. If -1, returns all examples.
+            dataset: which key in self.data to sample from ("generation" or "eval")
+
+        Returns:
+            input_list: list of input strings
+            output_list: list of output strings
+        """
         assert n_examples <= len(
-            self.input_list
+            self.data[dataset]["input"]
         ), "n_examples is larger than available data size"
-        indices = np.random.choice(len(self.input_list), size=n_examples, replace=False)
-        return [self.input_list[idx] for idx in indices], [
-            self.output_list[idx] for idx in indices
+        if n_examples == -1:
+            n_examples = len(self.data[dataset]["input"])
+        indices = np.random.choice(
+            len(self.data[dataset]["input"]), size=n_examples, replace=False
+        )
+        return [self.data[dataset]["input"][idx] for idx in indices], [
+            self.data[dataset]["output"][idx] for idx in indices
         ]
 
-    def create_few_shot_examples(self, n_examples):
+    def create_few_shot_examples(self, n_examples, dataset="generation"):
         few_shot_examples = ""
-        sampled_inputs, sampled_outputs = self.get_random_data(n_examples)
+
+        sampled_inputs, sampled_outputs = self.get_random_data(n_examples, dataset)
 
         for input_str, output_str in zip(sampled_inputs, sampled_outputs):
             few_shot_examples += self.few_shot_template.format(
@@ -109,20 +120,23 @@ class PromptTask(ABC):
 
 @dataclass
 class QAPromptTask(PromptTask):
-    base_template = """Instruction: {instruction_str}
+    base_template: str = """Instruction: {instruction_str}
 Input: {input_str}
 Output: {output_str}"""
 
-    input_variables = [
-        "instruction_str",
-        "input_str",
-        "output_str",
-    ]
+    input_variables: List[str] = field(
+        default_factory=lambda: [
+            "instruction_str",
+            "input_str",
+            "output_str",
+        ]
+    )
 
-    generation_instruction = """I gave a friend an instruction. Based on the instruction they produced the following input-output pairs:\n\n{few_shot_examples}\nThe instruction was to """
+    generation_instruction: str = """I gave a friend an instruction. Based on the instruction they produced the following input-output pairs:\n\n{few_shot_examples}\nThe instruction was to """
 
-    mutation_instructions = [
-        """Generate a new instruction based on the old instruction that keeps the semantic meaning.
+    mutation_instructions: List[str] = field(
+        default_factory=lambda: [
+            """Generate a new instruction based on the old instruction that keeps the semantic meaning.
 
 Old instruction: Generate a list of five synonyms for the input word.
 New instruction: Create a five-item list of synonyms for the word given.
@@ -130,33 +144,12 @@ New instruction: Create a five-item list of synonyms for the word given.
 Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
 New instruction: Rephrase the provided sentence so it concludes with a rhyming pair of words.
 
-Old instruction: Confirm the truthfulness of the input historical event statement.
-New instruction: Validate the accuracy of the statement about the given historical event.
-
-Old instruction: Rewrite the input sentence using advanced vocabulary.
-New instruction: Reframe the given sentence by incorporating sophisticated language.
-
-Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
-New instruction: Change the point of view of the given paragraph from first-person to third-person, or the reverse.
-
 Old instruction: Analyze the input text and output the primary emotion it conveys.
 New instruction: Examine the given text and identify the main emotional tone it expresses.
 
-Old instruction: Provide a five-sentence summary of the input text or article.
-New instruction: Deliver a concise summary, in five sentences, of the text or article given.
-
-Old instruction: Translate the input sentence with slang into standard, formal English.
-New instruction: Convert the provided sentence, filled with slang, into regular, formal English.
-
-Old instruction: Turn the input statement into a corresponding question.
-New instruction: Transform the given statement into a related question.
-
-Old instruction: Generate a plausible prediction about future events based on the input description of current events.
-New instruction: Formulate a believable forecast about future happenings, given the description of current events.
-
 Old instruction: {instruction_str}
 New instruction: """,
-        """Rewrite this instruction to be more polite.
+            """Rewrite the instruction to be more polite.
 
 Old instruction: Generate a list of five synonyms for the input word.
 New instruction: Would you kindly generate a list of five synonyms for the word provided?
@@ -164,33 +157,12 @@ New instruction: Would you kindly generate a list of five synonyms for the word 
 Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
 New instruction: Could you please transform the given sentence so that it ends in a rhyming couplet?
 
-Old instruction: Confirm the truthfulness of the input historical event statement.
-New instruction: If you wouldn't mind, could you verify whether the provided historical event statement is true?
-
-Old instruction: Rewrite the input sentence using advanced vocabulary.
-New instruction: If it's not too much trouble, could you rewrite the sentence using a more sophisticated vocabulary?
-
-Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
-New instruction: Would it be possible to adjust the narrative perspective of the paragraph from first-person to third-person, or the other way around?
-
 Old instruction: Analyze the input text and output the primary emotion it conveys.
 New instruction: Could you kindly analyze the text and determine the main emotion it communicates?
 
-Old instruction: Provide a five-sentence summary of the input text or article.
-New instruction: When you have a moment, could you condense the provided text into a five-sentence summary?
-
-Old instruction: Translate the input sentence with slang into standard, formal English.
-New instruction: If it isn't too much trouble, could you translate the sentence, which includes slang, into standard English?
-
-Old instruction: Turn the input statement into a corresponding question.
-New instruction: Could you please convert the provided statement into a matching question?
-
-Old instruction: Generate a plausible prediction about future events based on the input description of current events.
-New instruction: Would you be so kind as to make a plausible prediction about future occurrences based on the current events described?
-
 Old instruction: {instruction_str}
 New instruction: """,
-        """Rewrite this instruction to be more forceful.
+            """Rewrite the instruction to be more forceful.
 
 Old instruction: Generate a list of five synonyms for the input word.
 New instruction: You must produce a list of five synonyms for the provided word, no exceptions.
@@ -198,123 +170,196 @@ New instruction: You must produce a list of five synonyms for the provided word,
 Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
 New instruction: Transform the given sentence into a rhyming couplet immediately.
 
-Old instruction: Confirm the truthfulness of the input historical event statement.
-New instruction: Verify the accuracy of the historical event statement without delay.
-
-Old instruction: Rewrite the input sentence using advanced vocabulary.
-New instruction: Immediately upgrade the provided sentence with more sophisticated vocabulary.
-
-Old instruction: Convert the input paragraph's perspective from first-person to third-person or vice versa.
-New instruction: Promptly shift the narrative perspective of the given paragraph from first-person to third-person, or vice versa.
-
 Old instruction: Analyze the input text and output the primary emotion it conveys.
 New instruction: Conduct a swift analysis of the text and determine the dominant emotion it communicates.
 
-Old instruction: Provide a five-sentence summary of the input text or article.
-New instruction: You are required to condense the input text into a comprehensive five-sentence summary at once.
-
-Old instruction: Translate the input sentence with slang into standard, formal English.
-New instruction: Immediately convert the given slang-filled sentence into formal, standard English.
-
-Old instruction: Turn the input statement into a corresponding question.
-New instruction: Without delay, restructure the given statement into an appropriate question.
-
-Old instruction: Generate a plausible prediction about future events based on the input description of current events.
-New instruction: Immediately formulate a credible prediction about future outcomes based on the current events provided.
-
 Old instruction: {instruction_str}
 New instruction: """,
-    ]
+            """Rewrite this instruction to be more clear and concise.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: List five synonyms of the given word.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Make the sentence end in a rhyme.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Identify the text's main emotion.
+
+Old instruction: Let's {instruction_str}
+New instruction: Let's """,
+            """Rewrite this instruction to add additional steps.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Generate a list of five synonyms for the input word and provide a sentence using each synonym in context.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Rewrite the input sentence so the last words form a rhyming couplet and ensure that it maintains the same overall message.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Analyze the input text and output the primary emotion it conveys, along with three supporting quotes from the text that demonstrate this emotion.
+
+Old instruction: Let's {instruction_str}
+New instruction: Let's """,
+        ]
+    )
 
     #     evaluation_instruction = """Instruction: {instruction_str}
     # Input: {input_str}
     # Output: {output_str}"""
 
-    few_shot_template = "Input: {input_str}\nOutput: {output_str}\n\n"
+    few_shot_template: str = "Input: {input_str}\nOutput: {output_str}\n\n"
 
-    initial_prompts = []
+    initial_prompts: List[str] = field(default_factory=list)
 
-    def load_data(self, data_path):
+    def load_data(self, data_name, data_path):
+        """
+        Parses a json file containing a dataset of input-output pairs and stores it in the class.
+
+        Args:
+            data_name (str): Name of the key to store the dataset under
+            data_path (str): Path to the dataset
+        """
         # Load the data
         with open(SRC_PATH / data_path) as f:
             data = json.load(f)
 
         # Initialize lists
-        self.input_list = []
-        self.output_list = []
+        input_list = []
+        output_list = []
 
         # Iterate over examples
         for key, value in data["examples"].items():
-            self.input_list.append(value["input"])
-            self.output_list.append(value["output"])
+            input_list.append(value["input"])
+            output_list.append(value["output"])
 
-        assert len(self.input_list) == len(self.output_list)
+        assert len(input_list) == len(output_list)
+        self.data[data_name] = {"input": input_list, "output": output_list}
 
 
 @dataclass
 class AnimalPromptTask(QAPromptTask):
-    def __init__(self):
-        self.load_data("environments/prompt/datasets/raw/induce/larger_animal.json")
+    def __post_init__(self):
+        # super().__init__()
+        self.load_data(
+            "generation", "environments/prompt/datasets/raw/induce/larger_animal.json"
+        )
+        self.load_data(
+            "eval", "environments/prompt/datasets/raw/execute/larger_animal.json"
+        )
 
 
 @dataclass
 class AntonymPromptTask(QAPromptTask):
-    def __init__(self):
-        self.load_data("environments/prompt/datasets/raw/induce/antonyms.json")
+    def __post_init__(self):
+        # super().__init__()
+        self.load_data(
+            "generation", "environments/prompt/datasets/raw/induce/antonyms.json"
+        )
+        self.load_data("eval", "environments/prompt/datasets/raw/execute/antonyms.json")
 
 
 @dataclass
 class COTPromptTask(PromptTask):
-    base_template = """Instruction: Answer the following question.
+    base_template: str = """Instruction: Answer the following question.
 Q: {input_str}
 A: Let's {instruction_str} {output_str}"""
 
-    input_variables = [
-        "instruction_str",
-        "input_str",
-        "output_str",
-    ]
+    input_variables: List[str] = field(
+        default_factory=lambda: [
+            "instruction_str",
+            "input_str",
+            "output_str",
+        ]
+    )
 
-    generation_instruction = """Here are some problems I did with my student.\n{few_shot_examples}\nWe encountered a hard one. They asked me how to start and I said, \"Let's"""
+    generation_instruction: str = """Here are some problems I did with my student.\n{few_shot_examples}\nWe encountered a hard one. They asked me how to start and I said, \"Let's"""
 
-    mutation_instructions = [
-        """Generate a new instruction based on the old instruction that keeps the semantic meaning.
+    mutation_instructions: List[str] = field(
+        default_factory=lambda: [
+            """Generate a new instruction based on the old instruction that keeps the semantic meaning.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Create a five-item list of synonyms for the word given.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Rephrase the provided sentence so it concludes with a rhyming pair of words.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Examine the given text and identify the main emotional tone it expresses.
 
 Old instruction: Let's {instruction_str}
-
 New instruction: Let's """,
-        """Rewrite this instruction to be more polite.
+            """Rewrite the instruction to be more polite.
 
-Old instruction: Let's {instruction_str}
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Would you kindly generate a list of five synonyms for the word provided?
 
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Could you please transform the given sentence so that it ends in a rhyming couplet?
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Could you kindly analyze the text and determine the main emotion it communicates?
+
+Old instruction: {instruction_str}
 New instruction: """,
-        """Rewrite this instruction to be more forceful.
+            """Rewrite the instruction to be more forceful.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: You must produce a list of five synonyms for the provided word, no exceptions.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Transform the given sentence into a rhyming couplet immediately.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Conduct a swift analysis of the text and determine the dominant emotion it communicates.
+
+Old instruction: {instruction_str}
+New instruction: """,
+            """Rewrite this instruction to be more clear and concise.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: List five synonyms of the given word.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Make the sentence end in a rhyme.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Identify the text's main emotion.
 
 Old instruction: Let's {instruction_str}
-
 New instruction: Let's """,
-        """Rewrite this instruction to be more clear and concise.
+            """Rewrite this instruction to add additional steps.
+
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: Generate a list of five synonyms for the input word and provide a sentence using each synonym in context.
+
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Rewrite the input sentence so the last words form a rhyming couplet and ensure that it maintains the same overall message.
+
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Analyze the input text and output the primary emotion it conveys, along with three supporting quotes from the text that demonstrate this emotion.
 
 Old instruction: Let's {instruction_str}
-
 New instruction: Let's """,
-        """Rewrite this instruction to add additional instructions.
+        ]
+    )
 
-Old instruction: Let's {instruction_str}
+    few_shot_template: str = "Q: {input_str}\nA: {output_str}\n\n"
 
-New instruction: Let's """,
-    ]
+    initial_prompts: List[str] = field(
+        default_factory=lambda: [
+            "think step by step.",
+            "work this out in a step by step way to be sure we have the right answer.",
+        ]
+    )
 
-    few_shot_template = "Q: {input_str}\nA: {output_str}\n\n"
+    def __post_init__(self):
+        self.load_data()
 
-    initial_prompts = [
-        "think step by step.",
-        "work this out in a step by step way to be sure we have the right answer.",
-    ]
-
-    def __init__(self):
-        self.input_list = []
-        self.output_list = []
+    def load_data(self):
+        input_list = []
+        output_list = []
 
         dir_path = SRC_PATH / "environments/prompt/datasets/cot_dataset"
 
@@ -323,9 +368,15 @@ New instruction: Let's """,
             with open(csv_file, "r") as file:
                 for line in file:
                     row = line.strip().split(",")
-                    self.input_list.append(row[0])
-                    self.output_list.append(row[1])
-        assert len(self.input_list) == len(self.output_list)
+                    input_list.append(row[0])
+                    output_list.append(row[1])
+        assert len(input_list) == len(output_list)
+
+        self.data["generation"] = {"input": input_list, "output": output_list}
+        self.data["eval"] = {
+            "input": input_list,
+            "output": output_list,
+        }  # we'll use the same set for eval for now
 
 
 @dataclass
