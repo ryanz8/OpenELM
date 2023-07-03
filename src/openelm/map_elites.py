@@ -411,14 +411,17 @@ class MAPElitesBase:
             # placed in the same niche, for saving histories.
             for individual in new_individuals:
                 fitness = self.env.fitness(individual)
-                self.mutation_successes[individual.mutation_type][
-                    1
-                ] += 1  # increment attempts
                 inserted = self.insert_individual(individual, fitness)
-                if inserted:
+
+                # track mutation success rate if implemented
+                if hasattr(individual, "mutation_type"):
+                    if inserted:
+                        self.mutation_successes[individual.mutation_type][
+                            0
+                        ] += 1  # increment successes
                     self.mutation_successes[individual.mutation_type][
-                        0
-                    ] += 1  # increment successes
+                        1
+                    ] += 1  # increment attempts
 
                 # If new fitness is the highest so far, update the tracker.
                 if inserted and fitness > max_fitness:
