@@ -175,24 +175,24 @@ New instruction: Conduct a swift analysis of the text and determine the dominant
 
 Old instruction: {instruction_str}
 # New instruction: """,
-            # """Rewrite the instruction to be more concise.
-            # Old instruction: Generate a list of five synonyms for the input word.
-            # New instruction: List five synonyms for the word.
-            # Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
-            # New instruction: Make the sentence end in a rhyme.
-            # Old instruction: Analyze the input text and output the primary emotion it conveys.
-            # New instruction: Identify the text's main emotion.
-            # Old instruction: {instruction_str}
-            # New instruction: """,
-            # """Rewrite the instruction to be more complex or verbose.
-            # Old instruction: Generate a list of five synonyms for the input word.
-            # New instruction: It's your task to generate and provide a comprehensive list comprising of exactly five synonymous terms that closely match the semantics of the input word provided.
-            # Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
-            # New instruction: You're required to craftily reconstruct the provided sentence in such a manner that the terminal words form a harmonious rhyming couplet.
-            # Old instruction: Analyze the input text and output the primary emotion it conveys.
-            # New instruction: Devote your computational abilities to conduct an in-depth emotional analysis of the provided text, subsequently outputting the most dominant emotion that it seems to articulate.
-            # Old instruction: {instruction_str}
-            # New instruction: """,
+            """Rewrite the instruction to be more concise.
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: List five synonyms for the word.
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: Make the sentence end in a rhyme.
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Identify the text's main emotion.
+Old instruction: {instruction_str}
+New instruction: """,
+            """Rewrite the instruction to be more complex or verbose.
+Old instruction: Generate a list of five synonyms for the input word.
+New instruction: It's your task to generate and provide a comprehensive list comprising of exactly five synonymous terms that closely match the semantics of the input word provided.
+Old instruction: Rewrite the input sentence so the last words form a rhyming couplet.
+New instruction: You're required to craftily reconstruct the provided sentence in such a manner that the terminal words form a harmonious rhyming couplet.
+Old instruction: Analyze the input text and output the primary emotion it conveys.
+New instruction: Devote your computational abilities to conduct an in-depth emotional analysis of the provided text, subsequently outputting the most dominant emotion that it seems to articulate.
+Old instruction: {instruction_str}
+New instruction: """,
         ]
     )
 
